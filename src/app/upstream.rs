@@ -1,8 +1,8 @@
 use std::io;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
 
-use eyre::{Context, Result};
+use eyre::{Context, Result, bail};
 use tokio::net::{TcpStream, UdpSocket};
 use tokio::time::sleep;
 
@@ -17,7 +17,7 @@ pub struct Upstream {
 
 impl Upstream {
     async fn wake(&self) -> io::Result<()> {
-        info!("waking {}", self.address);
+        info!("waking upstream {}", self.address);
 
         let mut packet = Vec::with_capacity(102);
         packet.extend_from_slice(&[0xff; 6]);
@@ -25,7 +25,12 @@ impl Upstream {
             packet.extend_from_slice(self.hardware_addr.octets());
         }
 
-        let s = UdpSocket::bind("0.0.0.0:0").await?;
+        let bind_on = match self.address {
+            IpAddr::V4(_) => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            IpAddr::V6(_) => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+        };
+
+        let s = UdpSocket::bind((bind_on, 0)).await?;
         s.set_broadcast(true)?;
 
         s.send_to(&packet, (self.broadcast, 9)).await?;
@@ -61,7 +66,7 @@ impl Upstream {
                 Some(s) => return Ok(s),
                 None => {
                     if attempts == 5 {
-                        return Err(io::Error::from(io::ErrorKind::HostUnreachable).into());
+                        bail!("cannot connect to upstream");
                     } else {
                         sleep(delay).await;
                         delay *= 2;
