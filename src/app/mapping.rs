@@ -1,8 +1,17 @@
 use std::net::{IpAddr, SocketAddr};
 use std::ops::Range;
 
+use super::upstream::ConnectOpts;
+
+#[derive(Debug, Display, Clone)]
+#[display("{kind}")]
+pub struct Mapping {
+    pub kind: MappingKind,
+    pub opts: ConnectOpts,
+}
+
 #[derive(Debug, Display, Clone, PartialEq, Eq)]
-pub enum Mapping {
+pub enum MappingKind {
     #[display("{from}:{to}")]
     OneToOne { from: SocketAddr, to: SocketAddr },
 

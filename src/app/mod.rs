@@ -13,9 +13,9 @@ mod mapping;
 mod tunnel;
 mod upstream;
 
-use self::mapping::Mapping;
+use self::mapping::{Mapping, MappingKind};
 use self::tunnel::Tunnels;
-use self::upstream::Upstream;
+use self::upstream::{ConnectOpts, Upstream};
 
 #[derive(Debug)]
 pub struct App {
@@ -45,13 +45,17 @@ impl TryFrom<Config> for App {
         for x in config.forward {
             use Port::{Range, Single};
 
-            let mapping = match (x.from.port.clone(), x.to.port) {
-                (Single(from_port), Single(to_port)) => Mapping::OneToOne {
+            if !upstream.contains_key(&x.to.ip) {
+                bail!("no upstream directive found for {}", x.to.ip);
+            }
+
+            let kind = match (x.from.port.clone(), x.to.port) {
+                (Single(from_port), Single(to_port)) => MappingKind::OneToOne {
                     from: SocketAddr::new(x.from.ip, from_port),
                     to: SocketAddr::new(x.to.ip, to_port),
                 },
 
-                (Range(from_range), Single(to_port)) => Mapping::ManyToOne {
+                (Range(from_range), Single(to_port)) => MappingKind::ManyToOne {
                     from_ip: x.from.ip,
                     from_ports: from_range,
                     to: SocketAddr::new(x.to.ip, to_port),
@@ -61,7 +65,7 @@ impl TryFrom<Config> for App {
                     if from_range.len() != to_range.len() {
                         bail!("{:?}: 'from' and 'to' ranges do not match in size", x.from)
                     } else {
-                        Mapping::ManyToMany {
+                        MappingKind::ManyToMany {
                             from_ip: x.from.ip,
                             from_port_range_start: from_range.start,
                             to_ip: x.to.ip,
@@ -79,6 +83,14 @@ impl TryFrom<Config> for App {
                 }
             };
 
+            let opts = ConnectOpts {
+                wakeup_delay: x.wait_for,
+                max_attempts: x.max_attempts,
+                initial_retry_delay: x.retry_delay,
+                retry_delay_grow_factor: 2.0,
+            };
+
+            let mapping = Mapping { kind, opts };
             mappings.push(mapping);
         }
 
@@ -94,10 +106,10 @@ impl App {
         for mapping in self.mappings.iter().cloned() {
             let tunnels = Tunnels::new(&self);
 
-            match mapping {
-                Mapping::OneToOne { from, to } => tunnels.spawn(from, to).await?,
+            match mapping.kind {
+                MappingKind::OneToOne { from, to } => tunnels.spawn(from, to, mapping.opts).await?,
 
-                Mapping::ManyToOne {
+                MappingKind::ManyToOne {
                     from_ip,
                     from_ports,
                     to,
@@ -105,11 +117,11 @@ impl App {
                     for port in from_ports {
                         let from = SocketAddr::new(from_ip, port);
 
-                        tunnels.spawn(from, to).await?
+                        tunnels.spawn(from, to, mapping.opts.clone()).await?
                     }
                 }
 
-                Mapping::ManyToMany {
+                MappingKind::ManyToMany {
                     from_ip,
                     from_port_range_start,
                     to_ip,
@@ -120,7 +132,7 @@ impl App {
                         let from = SocketAddr::new(from_ip, from_port_range_start + i);
                         let to = SocketAddr::new(to_ip, to_port_range_start + i);
 
-                        tunnels.spawn(from, to).await?;
+                        tunnels.spawn(from, to, mapping.opts.clone()).await?;
                     }
                 }
             }

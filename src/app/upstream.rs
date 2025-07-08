@@ -17,7 +17,7 @@ pub struct Upstream {
 
 impl Upstream {
     async fn wake(&self) -> io::Result<()> {
-        info!("waking upstream {}", self.address);
+        info!("waking upstream");
 
         let mut packet = Vec::with_capacity(102);
         packet.extend_from_slice(&[0xff; 6]);
@@ -36,43 +36,56 @@ impl Upstream {
         s.send_to(&packet, (self.broadcast, 9)).await?;
         Ok(())
     }
+}
 
-    async fn try_connect(&self, port: u16) -> io::Result<Option<TcpStream>> {
-        match TcpStream::connect((self.address, port)).await {
-            Ok(s) => Ok(Some(s)),
-            Err(e)
-                if e.kind() == io::ErrorKind::HostUnreachable
-                    || e.kind() == io::ErrorKind::ConnectionRefused =>
-            {
-                Ok(None)
-            }
-            Err(e) => Err(e),
-        }
-    }
+#[derive(Debug, Clone)]
+pub struct ConnectOpts {
+    pub wakeup_delay: Duration,
+    pub max_attempts: u64,
+    pub initial_retry_delay: Duration,
+    pub retry_delay_grow_factor: f64,
+}
 
-    pub async fn connect(&self, port: u16) -> Result<TcpStream> {
-        if let Some(s) = self.try_connect(port).await? {
-            return Ok(s);
+impl Upstream {
+    pub async fn connect(&self, port: u16, opts: &ConnectOpts) -> Result<TcpStream> {
+        let to = SocketAddr::new(self.address, port);
+
+        if let Some(s) = try_connect(to).await {
+            return s.map_err(Into::into);
         }
 
         self.wake().await.context("cannot wake upstream")?;
+        sleep(opts.wakeup_delay).await;
 
         let mut attempts = 0;
-        let mut delay = Duration::from_secs(1);
+        let mut delay = opts.initial_retry_delay;
 
         loop {
-            attempts += 1;
-            match self.try_connect(port).await? {
-                Some(s) => return Ok(s),
+            match try_connect(to).await {
+                Some(Ok(x)) => return Ok(x),
+                Some(Err(e)) => return Err(e.into()),
                 None => {
-                    if attempts == 5 {
-                        bail!("cannot connect to upstream");
+                    if attempts == opts.max_attempts {
+                        bail!("cannot connect to upstream (max attempts reached)");
                     } else {
+                        warn!("failed to connect to upstream");
+                        attempts += 1;
+
                         sleep(delay).await;
-                        delay *= 2;
+                        delay = delay.mul_f64(opts.retry_delay_grow_factor);
                     }
                 }
             }
         }
+    }
+}
+
+async fn try_connect(addr: SocketAddr) -> Option<io::Result<TcpStream>> {
+    match TcpStream::connect(addr).await {
+        Ok(x) => Some(Ok(x)),
+        Err(e) => match e.kind() {
+            io::ErrorKind::HostUnreachable | io::ErrorKind::ConnectionRefused => None,
+            _ => Some(Err(e)),
+        },
     }
 }
