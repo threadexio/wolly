@@ -1,25 +1,28 @@
 #[macro_use]
 extern crate tracing;
 
+#[macro_use]
+extern crate derive_more;
+
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::fmt;
 use std::net::{IpAddr, SocketAddr};
-use std::ops::Range;
 use std::path::Path;
 use std::process::ExitCode;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
-use std::{fmt, io};
 
-use eyre::{Context, ContextCompat, Result, bail};
-use hardware_addr::HardwareAddr;
-use miniarg::split_args::SplitArgs;
-use thiserror::Error;
+use config::address::Port;
+use eyre::{Context, Result, bail};
 use tokio::net::TcpListener;
 use tokio::time::sleep;
 
+mod config;
 mod hardware_addr;
 mod upstream;
+
+use config::Config;
 
 use self::upstream::Upstream;
 
@@ -70,13 +73,13 @@ struct App {
 }
 
 impl App {
-    pub async fn run(self: Arc<Self>) {
+    pub async fn run(self: Arc<Self>) -> Result<()> {
         for mapping in self.mappings.iter().cloned() {
             info!("forwarding {mapping:?}");
 
             match mapping {
                 Mapping::Single { from, to } => {
-                    self.clone().forward(from, to).await.unwrap();
+                    self.clone().forward(from, to).await?;
                 }
 
                 Mapping::Range {
@@ -90,7 +93,7 @@ impl App {
                         let from = SocketAddr::new(from, from_port_base + i);
                         let to = SocketAddr::new(to, to_port_base + i);
 
-                        self.clone().forward(from, to).await.unwrap();
+                        self.clone().forward(from, to).await?;
                     }
                 }
             }
@@ -101,8 +104,10 @@ impl App {
         }
     }
 
-    async fn forward(self: Arc<Self>, from: SocketAddr, to: SocketAddr) -> io::Result<()> {
-        let listener = TcpListener::bind(from).await?;
+    async fn forward(self: Arc<Self>, from: SocketAddr, to: SocketAddr) -> Result<()> {
+        let listener = TcpListener::bind(from)
+            .await
+            .with_context(|| format!("failed to bind listener on {from}"))?;
 
         tokio::spawn(async move {
             loop {
@@ -149,211 +154,66 @@ impl App {
     {
         let path = path.as_ref();
         let data = tokio::fs::read_to_string(path).await?;
-        data.parse()
+        let config: Config = data.parse()?;
+        config.try_into()
     }
 }
 
-impl FromStr for App {
-    type Err = eyre::Report;
+impl TryFrom<Config> for App {
+    type Error = eyre::Report;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // upstream <ip> [mac <mac>] [brd <ip>]
-        #[derive(Debug)]
-        struct UpstreamStmt {
-            addr: IpAddr,
-            mac: HardwareAddr,
-            brd: IpAddr,
-        }
-
-        impl UpstreamStmt {
-            fn parse(args: &mut SplitArgs) -> Result<Self> {
-                let addr = args
-                    .next()
-                    .context("missing upstream <ip> address")?
-                    .parse()
-                    .context("invalid upstream <ip> address")?;
-
-                let mut mac = None;
-                let mut brd = None;
-
-                while let Some(arg) = args.next() {
-                    match arg {
-                        "mac" => {
-                            mac = Some(
-                                args.next()
-                                    .context("expected upstream <mac> address")?
-                                    .parse()
-                                    .context("invalid upstream <mac> address")?,
-                            );
-                        }
-
-                        "brd" => {
-                            brd = Some(
-                                args.next()
-                                    .context("expected upstream broadcast <ip> address")?
-                                    .parse()
-                                    .context("invalid upstream broadcast <ip> address")?,
-                            );
-                        }
-
-                        x => {
-                            warn!("ignoring unknown argument '{x}'");
-                        }
-                    }
-                }
-
-                Ok(Self {
-                    addr,
-                    mac: mac.context("missing <mac>")?,
-                    brd: brd.context("missing <brd>")?,
-                })
-            }
-        }
-
-        #[derive(Debug)]
-        enum Port {
-            Single(u16),
-            Range(Range<u16>),
-        }
-
-        #[derive(Debug)]
-        struct AddrSpec {
-            addr: IpAddr,
-            port: Port,
-        }
-
-        impl FromStr for AddrSpec {
-            type Err = eyre::Report;
-
-            fn from_str(s: &str) -> Result<Self> {
-                let (addr, port) = s.split_once(':').context("missing ':' separator")?;
-
-                let addr = addr.parse().context("invalid <ip> address")?;
-
-                let port = match port.split_once('-') {
-                    Some((start, end)) => {
-                        let start: u16 = start.parse().context("invalid start port")?;
-                        let end: u16 = end.parse().context("invalid end port")?;
-
-                        Port::Range(start..end + 1)
-                    }
-
-                    None => Port::Single(port.parse().context("invalid port")?),
-                };
-
-                Ok(Self { addr, port })
-            }
-        }
-
-        // forward <ip>:<port> to <ip>:<port>
-        #[derive(Debug)]
-        struct ForwardStmt {
-            from: AddrSpec,
-            to: AddrSpec,
-        }
-
-        impl ForwardStmt {
-            fn parse(args: &mut SplitArgs) -> Result<Self> {
-                let from = args
-                    .next()
-                    .context("expected forward source address")?
-                    .parse()
-                    .context("invalid forward source address")?;
-
-                let to = args.next().context("expected 'to'")?;
-                if to != "to" {
-                    bail!("expected 'to', not '{to}'");
-                }
-
-                let to = args
-                    .next()
-                    .context("expected forward destination address")?
-                    .parse()
-                    .context("invalid forward destination address")?;
-
-                Ok(Self { from, to })
-            }
-        }
-
-        #[derive(Debug)]
-        enum Stmt {
-            Upstream(UpstreamStmt),
-            Forward(ForwardStmt),
-        }
-
-        impl Stmt {
-            fn parse(args: &mut SplitArgs) -> Result<Self> {
-                match args.next().expect("stmt should not be empty") {
-                    "upstream" => UpstreamStmt::parse(args).map(Self::Upstream),
-                    "forward" => ForwardStmt::parse(args).map(Self::Forward),
-                    _ => bail!("unknown statement"),
-                }
-            }
-        }
-
+    fn try_from(config: Config) -> Result<Self> {
         let mut upstream = HashMap::new();
         let mut mappings = Vec::new();
 
-        let lines = s
-            .lines()
-            .enumerate()
-            .map(|(i, line)| (i, line.trim()))
-            .filter(|(_, line)| !line.is_empty())
-            .filter(|(_, line)| !line.starts_with('#'))
-            .map(|(i, line)| (i, SplitArgs::new(line)));
+        for x in config.upstream {
+            let Entry::Vacant(entry) = upstream.entry(x.address) else {
+                bail!("duplicate upstream directives for {}", x.address);
+            };
 
-        for (i, mut args) in lines {
-            let stmt = Stmt::parse(&mut args).with_context(|| format!("line {}", i + 1))?;
+            entry.insert(Upstream {
+                hardware_addr: x.mac,
+                address: x.address,
+                broadcast: x.broadcast,
+            });
+        }
 
-            match stmt {
-                Stmt::Upstream(UpstreamStmt { addr, mac, brd }) => {
-                    upstream.insert(
-                        addr,
-                        Upstream {
-                            address: addr,
-                            hardware_addr: mac,
-                            broadcast: brd,
-                        },
-                    );
-                }
+        for x in config.forward {
+            use Port::{Range, Single};
 
-                Stmt::Forward(ForwardStmt { from, to }) => {
-                    let mapping = match (from.port, to.port) {
-                        (Port::Single(from_port), Port::Single(to_port)) => Mapping::Single {
-                            from: SocketAddr::new(from.addr, from_port),
-                            to: SocketAddr::new(to.addr, to_port),
-                        },
-                        (Port::Range(a), Port::Range(b)) => {
-                            if a.len() != b.len() {
-                                bail!("port ranges are not of the same length");
-                            }
+            let mapping = match (x.from.port.clone(), x.to.port) {
+                (Single(from_port), Single(to_port)) => Mapping::Single {
+                    from: SocketAddr::new(x.from.ip, from_port),
+                    to: SocketAddr::new(x.to.ip, to_port),
+                },
 
-                            Mapping::Range {
-                                from: from.addr,
-                                to: to.addr,
-                                from_port_base: a.start,
-                                to_port_base: b.start,
-                                range_len: a.len().try_into().context("port range too big")?,
-                            }
+                (Range(from_range), Range(to_range)) => {
+                    if from_range.len() != to_range.len() {
+                        bail!("{:?}: 'from' and 'to' ranges do not match in size", x.from)
+                    } else {
+                        Mapping::Range {
+                            from: x.from.ip,
+                            to: x.to.ip,
+                            from_port_base: from_range.start,
+                            to_port_base: to_range.start,
+                            range_len: from_range
+                                .len()
+                                .try_into()
+                                .expect("the length of Range<u16> can never be greater than u16"),
                         }
-                        (Port::Single(_), Port::Range(_)) => {
-                            bail!("cannot forward one port to many")
-                        }
-                        (Port::Range(_), Port::Single(_)) => {
-                            bail!("cannot forward many ports to one")
-                        }
-                    };
-
-                    if !upstream.contains_key(&to.addr) {
-                        bail!(
-                            "upstream {} is unknown. perhaps you are missing an 'upstream' statement?",
-                            to.addr
-                        );
                     }
-
-                    mappings.push(mapping);
                 }
-            }
+
+                (Single(_), Range(_)) => {
+                    bail!("{:?}: cannot map a single port to a range of ports", x.from)
+                }
+
+                (Range(_), Single(_)) => {
+                    bail!("{:?}: cannot map a range of ports to a single port", x.from)
+                }
+            };
+
+            mappings.push(mapping);
         }
 
         Ok(Self { upstream, mappings })
@@ -379,9 +239,8 @@ async fn main() -> ExitCode {
 async fn try_main() -> Result<()> {
     let path = "wolly.conf";
 
-    let app = App::read(path).await.with_context(|| format!("{path}"))?;
+    let app = App::read(path).await.with_context(|| path)?;
 
     let app = Arc::new(app);
-    app.run().await;
-    Ok(())
+    app.run().await
 }
