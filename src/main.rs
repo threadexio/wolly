@@ -8,22 +8,20 @@ use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::fmt;
 use std::net::{IpAddr, SocketAddr};
-use std::path::Path;
 use std::process::ExitCode;
 use std::sync::Arc;
-use std::time::Duration;
 
 use config::address::Port;
 use eyre::{Context, Result, bail};
 use tokio::net::TcpListener;
-use tokio::time::sleep;
 
 mod config;
 mod hardware_addr;
+mod signal;
 mod upstream;
 
-use config::Config;
-
+use self::config::Config;
+use self::signal::Signals;
 use self::upstream::Upstream;
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -74,6 +72,8 @@ struct App {
 
 impl App {
     pub async fn run(self: Arc<Self>) -> Result<()> {
+        let mut signals = Signals::new().context("failed to register signal handlers")?;
+
         for mapping in self.mappings.iter().cloned() {
             info!("forwarding {mapping:?}");
 
@@ -99,9 +99,9 @@ impl App {
             }
         }
 
-        loop {
-            sleep(Duration::from_secs(10)).await;
-        }
+        signals.wait_terminate().await;
+        info!("exiting...");
+        Ok(())
     }
 
     async fn forward(self: Arc<Self>, from: SocketAddr, to: SocketAddr) -> Result<()> {
@@ -146,16 +146,6 @@ impl App {
         });
 
         Ok(())
-    }
-
-    pub async fn read<P>(path: P) -> Result<Self>
-    where
-        P: AsRef<Path>,
-    {
-        let path = path.as_ref();
-        let data = tokio::fs::read_to_string(path).await?;
-        let config: Config = data.parse()?;
-        config.try_into()
     }
 }
 
@@ -239,8 +229,8 @@ async fn main() -> ExitCode {
 async fn try_main() -> Result<()> {
     let path = "wolly.conf";
 
-    let app = App::read(path).await.with_context(|| path)?;
+    let config = Config::read(path).await.with_context(|| path)?;
+    let app = App::try_from(config).map(Arc::new)?;
 
-    let app = Arc::new(app);
     app.run().await
 }
