@@ -1,3 +1,4 @@
+use std::fmt;
 use std::net::{AddrParseError, IpAddr};
 use std::num::ParseIntError;
 use std::ops::Range;
@@ -6,18 +7,30 @@ use std::str::FromStr;
 use thiserror::Error;
 
 #[derive(Debug, Clone)]
-#[debug("{ip}:{port:?}")]
+pub enum Port {
+    Single(u16),
+    Range(Range<u16>),
+}
+
+impl fmt::Display for Port {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Port::Single(x) => write!(f, "{x}"),
+            Port::Range(x) => write!(f, "{}-{}", x.start, x.end - 1),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Address {
     pub ip: IpAddr,
     pub port: Port,
 }
 
-#[derive(Debug, Clone)]
-pub enum Port {
-    #[debug("{_0}")]
-    Single(u16),
-    #[debug("{}-{}", _0.start, _0.end - 1)]
-    Range(Range<u16>),
+impl fmt::Display for Address {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.ip, self.port)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

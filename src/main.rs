@@ -1,9 +1,6 @@
 #[macro_use]
 extern crate tracing;
 
-#[macro_use]
-extern crate derive_more;
-
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;

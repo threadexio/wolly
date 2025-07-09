@@ -1,3 +1,4 @@
+use std::fmt;
 use std::path::Path;
 use std::str::FromStr;
 
@@ -32,17 +33,26 @@ impl Config {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParseErrorKind {
+    Upstream(upstream::ParseUpstreamError),
+    Forward(forward::ParseForwardError),
+}
+
+impl fmt::Display for ParseErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Upstream(x) => x.fmt(f),
+            Self::Forward(x) => x.fmt(f),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[error("line {line}: {kind}")]
 pub struct ParseError {
     line: usize,
     kind: ParseErrorKind,
-}
-
-#[derive(Debug, Display, Clone, PartialEq, Eq)]
-pub enum ParseErrorKind {
-    Upstream(upstream::ParseUpstreamError),
-    Forward(forward::ParseForwardError),
 }
 
 impl FromStr for Config {
