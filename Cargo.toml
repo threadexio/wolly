@@ -2,6 +2,13 @@
 name = "wolly"
 version = "0.1.0"
 edition = "2024"
+authors = ["threadexio"]
+description = """
+A transparent TCP proxy with Wake-On-Lan capabilities.
+"""
+readme = "README.md"
+homepage = "https://github.com/threadexio/wolly"
+repository = "https://github.com/threadexio/wolly"
 
 [dependencies]
 clap = { version = "4.5.40", features = ["derive"] }

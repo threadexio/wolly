@@ -343,7 +343,7 @@ impl Mapping {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseErrorKind {
     Upstream(ParseUpstreamError),
-    Forward(ParseMappingError),
+    Mapping(ParseMappingError),
 
     DuplicateUpstreamDirectives,
 }
@@ -352,7 +352,7 @@ impl fmt::Display for ParseErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Upstream(x) => x.fmt(f),
-            Self::Forward(x) => x.fmt(f),
+            Self::Mapping(x) => x.fmt(f),
             Self::DuplicateUpstreamDirectives => f.write_str("duplicate upstream directives"),
         }
     }
@@ -403,7 +403,7 @@ impl FromStr for App {
 
                 "forward" => {
                     let x = Mapping::parse(&mut stream)
-                        .map_err(ParseErrorKind::Forward)
+                        .map_err(ParseErrorKind::Mapping)
                         .map_err(parse_error)?;
 
                     mappings.push(x);
