@@ -3,12 +3,6 @@ use std::ops::Range;
 
 use super::upstream::ConnectOpts;
 
-#[derive(Debug, Clone)]
-pub struct Mapping {
-    pub kind: MappingKind,
-    pub opts: ConnectOpts,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MappingKind {
     OneToOne {
@@ -29,4 +23,10 @@ pub enum MappingKind {
         to_port_range_start: u16,
         port_range_len: u16,
     },
+}
+
+#[derive(Debug, Clone)]
+pub struct Mapping {
+    pub kind: MappingKind,
+    pub opts: ConnectOpts,
 }

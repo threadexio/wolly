@@ -56,8 +56,14 @@ impl Display for _display<'_, std::net::SocketAddr> {
     }
 }
 
-impl Display for _display<'_, crate::config::address::Address> {
+impl Display for _display<'_, std::path::Path> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        self.0.bright_yellow().fmt(f)
+        self.0.display().magenta().fmt(f)
+    }
+}
+
+impl Display for _display<'_, std::path::PathBuf> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        _display(self.0.as_path()).fmt(f)
     }
 }

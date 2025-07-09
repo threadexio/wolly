@@ -10,7 +10,7 @@ use crate::hardware_addr::HardwareAddr;
 
 #[derive(Debug)]
 pub struct Upstream {
-    pub hardware_addr: HardwareAddr,
+    pub mac: HardwareAddr,
     pub address: IpAddr,
     pub broadcast: IpAddr,
 }
@@ -22,7 +22,7 @@ impl Upstream {
         let mut packet = Vec::with_capacity(102);
         packet.extend_from_slice(&[0xff; 6]);
         for _ in 0..16 {
-            packet.extend_from_slice(self.hardware_addr.octets());
+            packet.extend_from_slice(self.mac.octets());
         }
 
         let bind_on = match self.address {
@@ -40,9 +40,9 @@ impl Upstream {
 
 #[derive(Debug, Clone)]
 pub struct ConnectOpts {
-    pub wakeup_delay: Duration,
+    pub wait_for: Duration,
     pub max_attempts: NonZero<u64>,
-    pub initial_retry_delay: Duration,
+    pub retry_delay: Duration,
     pub retry_delay_grow_factor: f64,
 }
 
@@ -57,10 +57,10 @@ impl Upstream {
         }
 
         self.wake().await?;
-        sleep(opts.wakeup_delay).await;
+        sleep(opts.wait_for).await;
 
         let mut attempts = 0;
-        let mut delay = opts.initial_retry_delay;
+        let mut delay = opts.retry_delay;
 
         loop {
             match TcpStream::connect(to).await {

@@ -3,7 +3,6 @@ extern crate tracing;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::sync::Arc;
 
 use clap::Parser;
 use eyre::{Context, Result};
@@ -11,16 +10,12 @@ use tracing::level_filters::LevelFilter;
 
 #[macro_use]
 mod display;
-#[macro_use]
-mod util;
 
 mod app;
-mod config;
 mod hardware_addr;
 mod signal;
 
 use self::app::App;
-use self::config::Config;
 
 #[derive(Debug, Parser)]
 struct CliArgs {
@@ -61,11 +56,10 @@ async fn main() -> ExitCode {
 }
 
 async fn try_main(args: CliArgs) -> Result<()> {
-    let config = Config::read(&args.config_path)
+    let config = tokio::fs::read_to_string(&args.config_path)
         .await
-        .with_context(|| format!("{}", args.config_path.display()))?;
+        .with_context(|| format!("{}", display!(args.config_path)))?;
 
-    let app = App::try_from(config).map(Arc::new)?;
-
+    let app: App = config.parse()?;
     app.run().await
 }
