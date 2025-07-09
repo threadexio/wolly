@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::net::{IpAddr, SocketAddr};
+use std::num::NonZero;
 use std::sync::Arc;
 
-use eyre::{Context, Result, bail};
+use eyre::{Context, ContextCompat, Result, bail};
+use owo_colors::OwoColorize;
 use tokio::net::TcpListener;
 
 use crate::config::Config;
@@ -42,54 +44,58 @@ impl TryFrom<Config> for App {
         }
 
         for x in config.forward {
-            use Port::{Range, Single};
+            let mapping = try2!({
+                use Port::{Range, Single};
 
-            if !upstream.contains_key(&x.to.ip) {
-                bail!("no upstream directive found for {}", x.to.ip);
-            }
+                if !upstream.contains_key(&x.to.ip) {
+                    bail!("no upstream directive found for {}", x.to.ip);
+                }
 
-            let kind = match (x.from.port.clone(), x.to.port) {
-                (Single(from_port), Single(to_port)) => MappingKind::OneToOne {
-                    from: SocketAddr::new(x.from.ip, from_port),
-                    to: SocketAddr::new(x.to.ip, to_port),
-                },
+                let kind = match (x.from.port.clone(), x.to.port) {
+                    (Single(from_port), Single(to_port)) => MappingKind::OneToOne {
+                        from: SocketAddr::new(x.from.ip, from_port),
+                        to: SocketAddr::new(x.to.ip, to_port),
+                    },
 
-                (Range(from_range), Single(to_port)) => MappingKind::ManyToOne {
-                    from_ip: x.from.ip,
-                    from_ports: from_range,
-                    to: SocketAddr::new(x.to.ip, to_port),
-                },
+                    (Range(from_range), Single(to_port)) => MappingKind::ManyToOne {
+                        from_ip: x.from.ip,
+                        from_ports: from_range,
+                        to: SocketAddr::new(x.to.ip, to_port),
+                    },
 
-                (Range(from_range), Range(to_range)) => {
-                    if from_range.len() != to_range.len() {
-                        bail!("{:?}: 'from' and 'to' ranges do not match in size", x.from)
-                    } else {
-                        MappingKind::ManyToMany {
-                            from_ip: x.from.ip,
-                            from_port_range_start: from_range.start,
-                            to_ip: x.to.ip,
-                            to_port_range_start: to_range.start,
-                            port_range_len: from_range
-                                .len()
-                                .try_into()
-                                .expect("the length of Range<u16> can never be greater than u16"),
+                    (Range(from_range), Range(to_range)) => {
+                        if from_range.len() != to_range.len() {
+                            bail!("'from' and 'to' ranges do not match in size")
+                        } else {
+                            MappingKind::ManyToMany {
+                                from_ip: x.from.ip,
+                                from_port_range_start: from_range.start,
+                                to_ip: x.to.ip,
+                                to_port_range_start: to_range.start,
+                                port_range_len: from_range.len().try_into().expect(
+                                    "the length of Range<u16> can never be greater than u16",
+                                ),
+                            }
                         }
                     }
-                }
 
-                (Single(_), Range(_)) => {
-                    bail!("{:?}: cannot map a single port to a range of ports", x.from)
-                }
-            };
+                    (Single(_), Range(_)) => {
+                        bail!("cannot map a single port to a range of ports")
+                    }
+                };
 
-            let opts = ConnectOpts {
-                wakeup_delay: x.wait_for,
-                max_attempts: x.max_attempts,
-                initial_retry_delay: x.retry_delay,
-                retry_delay_grow_factor: 2.0,
-            };
+                let opts = ConnectOpts {
+                    wakeup_delay: x.wait_for,
+                    max_attempts: NonZero::new(x.max_attempts)
+                        .context("'max-attempts' cannot be zero")?,
+                    initial_retry_delay: x.retry_delay,
+                    retry_delay_grow_factor: 2.0,
+                };
 
-            let mapping = Mapping { kind, opts };
+                Ok(Mapping { kind, opts })
+            })
+            .with_context(|| format!("{}", display!(x.from)))?;
+
             mappings.push(mapping);
         }
 
@@ -152,7 +158,7 @@ async fn spawn_tunnel(
 ) -> Result<()> {
     let listener = TcpListener::bind(from)
         .await
-        .with_context(|| format!("failed to bind listener on {from}"))?;
+        .with_context(|| format!("failed to bind listener on {}", display!(from)))?;
 
     tokio::spawn(async move {
         loop {
@@ -166,7 +172,6 @@ async fn spawn_tunnel(
             tokio::spawn(async move {
                 let span = error_span!("tunnel", from = addr.to_string(), to = to.to_string());
                 let _enter = span.enter();
-
                 info!("connected");
 
                 let upstream = app
@@ -174,19 +179,18 @@ async fn spawn_tunnel(
                     .get(&to.ip())
                     .expect("upstream should be known");
 
-                let r: Result<()> = async move {
-                    let mut a = a;
-                    let mut b = upstream.connect(to.port(), &opts).await?;
+                let mut a = a;
+                let mut b = match upstream.connect(to.port(), &opts).await {
+                    Ok(x) => x,
+                    Err(e) => {
+                        error!("cannot connect to upstream: {}", display!(e));
+                        return;
+                    }
+                };
 
-                    let _ = tokio::io::copy_bidirectional(&mut a, &mut b).await;
-                    info!("disconnected");
-                    Ok(())
-                }
-                .await;
-
-                if let Err(e) = r {
-                    error!("{e:#}");
-                }
+                info!("{} to upstream", "connected".bright_green());
+                let _ = tokio::io::copy_bidirectional(&mut a, &mut b).await;
+                info!("disconnected");
             });
         }
     });

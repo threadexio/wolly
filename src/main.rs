@@ -10,6 +10,12 @@ use std::sync::Arc;
 
 use clap::Parser;
 use eyre::{Context, Result};
+use tracing::level_filters::LevelFilter;
+
+#[macro_use]
+mod display;
+#[macro_use]
+mod util;
 
 mod app;
 mod config;
@@ -21,6 +27,9 @@ use self::config::Config;
 
 #[derive(Debug, Parser)]
 struct CliArgs {
+    #[clap(short, help = "Be verbose.")]
+    verbose: bool,
+
     #[clap(
         help = "Specify the config file.",
         value_name = "config",
@@ -31,12 +40,21 @@ struct CliArgs {
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    let args = CliArgs::parse();
+
+    let max_level = if args.verbose {
+        LevelFilter::DEBUG
+    } else {
+        LevelFilter::INFO
+    };
+
     tracing_subscriber::fmt()
         .compact()
         .with_target(false)
+        .with_max_level(max_level)
         .init();
 
-    match try_main().await {
+    match try_main(args).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             error!("{e:#}");
@@ -45,9 +63,7 @@ async fn main() -> ExitCode {
     }
 }
 
-async fn try_main() -> Result<()> {
-    let args = CliArgs::parse();
-
+async fn try_main(args: CliArgs) -> Result<()> {
     let config = Config::read(&args.config_path)
         .await
         .with_context(|| format!("{}", args.config_path.display()))?;

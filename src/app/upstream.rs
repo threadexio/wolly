@@ -1,8 +1,8 @@
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::num::NonZero;
 use std::time::Duration;
 
-use eyre::{Context, Result, bail};
 use tokio::net::{TcpStream, UdpSocket};
 use tokio::time::sleep;
 
@@ -41,25 +41,22 @@ impl Upstream {
 #[derive(Debug, Clone)]
 pub struct ConnectOpts {
     pub wakeup_delay: Duration,
-    pub max_attempts: u64,
+    pub max_attempts: NonZero<u64>,
     pub initial_retry_delay: Duration,
     pub retry_delay_grow_factor: f64,
 }
 
 impl Upstream {
-    pub async fn connect(&self, port: u16, opts: &ConnectOpts) -> Result<TcpStream> {
+    pub async fn connect(&self, port: u16, opts: &ConnectOpts) -> io::Result<TcpStream> {
         let to = SocketAddr::new(self.address, port);
 
         match TcpStream::connect(to).await {
             Ok(x) => return Ok(x),
-            Err(e) => {
-                if !should_retry(&e) {
-                    return Err(e.into());
-                }
-            }
+            Err(e) if !is_retry_error(&e) => return Err(e),
+            Err(_) => {}
         }
 
-        self.wake().await.context("cannot wake upstream")?;
+        self.wake().await?;
         sleep(opts.wakeup_delay).await;
 
         let mut attempts = 0;
@@ -68,19 +65,19 @@ impl Upstream {
         loop {
             match TcpStream::connect(to).await {
                 Ok(x) => return Ok(x),
+                Err(e) if !is_retry_error(&e) => return Err(e),
                 Err(e) => {
-                    if should_retry(&e) {
-                        if attempts == opts.max_attempts {
-                            bail!("cannot connect to upstream (max attempts reached)");
-                        } else {
-                            warn!("failed to connect to upstream: {e}");
-                            attempts += 1;
+                    attempts += 1;
 
-                            sleep(delay).await;
-                            delay = delay.mul_f64(opts.retry_delay_grow_factor);
-                        }
+                    if attempts == opts.max_attempts.get() {
+                        debug!("max attempts reached, will not try again");
+                        return Err(e);
                     } else {
-                        return Err(e.into());
+                        warn!("failed to connect to upstream: {}", display!(e));
+                        debug!("retrying in {}", display!(delay));
+                        sleep(delay).await;
+                        delay = delay.mul_f64(opts.retry_delay_grow_factor);
+                        continue;
                     }
                 }
             }
@@ -88,7 +85,7 @@ impl Upstream {
     }
 }
 
-fn should_retry(e: &io::Error) -> bool {
+fn is_retry_error(e: &io::Error) -> bool {
     use io::ErrorKind::*;
 
     matches!(e.kind(), HostUnreachable | ConnectionRefused)
