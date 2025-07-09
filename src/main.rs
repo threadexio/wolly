@@ -17,6 +17,7 @@ mod mapping;
 mod parse;
 mod signal;
 mod upstream;
+mod util;
 
 use self::app::App;
 

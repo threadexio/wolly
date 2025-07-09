@@ -3,7 +3,7 @@ use std::collections::hash_map::Entry;
 use std::fmt;
 use std::iter::Peekable;
 use std::net::{AddrParseError, IpAddr, SocketAddr};
-use std::num::{NonZero, ParseIntError};
+use std::num::{NonZero, ParseFloatError, ParseIntError};
 use std::ops::Range;
 use std::str::FromStr;
 use std::time::Duration;
@@ -202,6 +202,12 @@ pub enum ParseMappingError {
     #[error("invalid retry delay")]
     InvalidRetryDelay(ParseIntError),
 
+    #[error("expected 'retry-factor'")]
+    ExpectedRetryFactor,
+
+    #[error("invalid retry factor: {0}")]
+    InvalidRetryFactor(ParseFloatError),
+
     #[error("'from' and 'to' ranges do not match in size")]
     InvalidPortRanges,
 
@@ -236,6 +242,7 @@ impl Mapping {
         let mut wait_for = Duration::from_secs(0);
         let mut max_attempts = 5;
         let mut retry_delay = Duration::from_secs(1);
+        let mut retry_factor = 2.0;
 
         while let Some(x) = stream.next() {
             match x {
@@ -262,7 +269,15 @@ impl Mapping {
                         .ok_or(ExpectedRetryDelay)?
                         .parse()
                         .map_err(InvalidRetryDelay)
-                        .map(Duration::from_secs)?;
+                        .map(Duration::from_secs)?
+                }
+
+                "retry-factor" => {
+                    retry_factor = stream
+                        .next()
+                        .ok_or(ExpectedRetryFactor)?
+                        .parse()
+                        .map_err(InvalidRetryFactor)?
                 }
 
                 _ => {
@@ -280,6 +295,13 @@ impl Mapping {
                 );
                 NonZero::new(1).expect("1 is not 0")
             }
+        };
+
+        let opts = ConnectOpts {
+            wait_for,
+            max_attempts,
+            retry_delay,
+            retry_factor,
         };
 
         let kind = match (from.port.clone(), to.port) {
@@ -312,13 +334,6 @@ impl Mapping {
             }
 
             (Single(_), Range(_)) => return Err(InvalidMappingType),
-        };
-
-        let opts = ConnectOpts {
-            wait_for,
-            max_attempts,
-            retry_delay,
-            retry_delay_grow_factor: 2.0,
         };
 
         Ok(Self { kind, opts })

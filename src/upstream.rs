@@ -7,6 +7,7 @@ use tokio::net::{TcpStream, UdpSocket};
 use tokio::time::sleep;
 
 use crate::hardware_addr::HardwareAddr;
+use crate::util::DurationExt;
 
 #[derive(Debug)]
 pub struct Upstream {
@@ -43,7 +44,7 @@ pub struct ConnectOpts {
     pub wait_for: Duration,
     pub max_attempts: NonZero<u64>,
     pub retry_delay: Duration,
-    pub retry_delay_grow_factor: f64,
+    pub retry_factor: f64,
 }
 
 impl Upstream {
@@ -76,7 +77,12 @@ impl Upstream {
                         warn!("failed to connect to upstream: {}", display!(e));
                         debug!("retrying in {}", display!(delay));
                         sleep(delay).await;
-                        delay = delay.mul_f64(opts.retry_delay_grow_factor);
+
+                        delay = delay.checked_mul_f64(opts.retry_factor).unwrap_or_else(|| {
+                            warn!("invalid retry factor");
+                            delay
+                        });
+
                         continue;
                     }
                 }
