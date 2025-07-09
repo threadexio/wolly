@@ -1,4 +1,5 @@
-{ rustPlatform
+{ rustToolchain
+, makeRustPlatform
 , lib
 , ...
 }:
@@ -8,6 +9,11 @@ with lib;
 
 let
   cargoManifest = fromTOML (readFile ../Cargo.toml);
+
+  rustPlatform = makeRustPlatform {
+    cargo = rustToolchain;
+    rustc = rustToolchain;
+  };
 in
 
 rustPlatform.buildRustPackage {
