@@ -40,7 +40,7 @@
             ];
           });
         in {
-          default = mkShell pkgs;
+          default = mkShell pkgs {};
 
           cross-aarch64-gnu = mkShell pkgs.pkgsCross.aarch64-multiplatform {
             CARGO_BUILD_TARGET = "aarch64-unknown-linux-gnu";
