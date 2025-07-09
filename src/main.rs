@@ -4,9 +4,11 @@ extern crate tracing;
 #[macro_use]
 extern crate derive_more;
 
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
+use clap::Parser;
 use eyre::{Context, Result};
 
 mod app;
@@ -16,6 +18,16 @@ mod signal;
 
 use self::app::App;
 use self::config::Config;
+
+#[derive(Debug, Parser)]
+struct CliArgs {
+    #[clap(
+        help = "Specify the config file.",
+        value_name = "config",
+        default_value = "wolly.conf"
+    )]
+    config_path: PathBuf,
+}
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -34,9 +46,12 @@ async fn main() -> ExitCode {
 }
 
 async fn try_main() -> Result<()> {
-    let path = "wolly.conf";
+    let args = CliArgs::parse();
 
-    let config = Config::read(path).await.with_context(|| path)?;
+    let config = Config::read(&args.config_path)
+        .await
+        .with_context(|| format!("{}", args.config_path.display()))?;
+
     let app = App::try_from(config).map(Arc::new)?;
 
     app.run().await
