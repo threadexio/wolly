@@ -4,16 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-eyre = "0.6.12"
-serde = { version = "1.0.219", features = ["derive"] }
-serde_json = "1.0.140"
-thiserror = "2"
-tokio = { version = "1", features = ["net", "io-util", "rt-multi-thread", "macros", "time", "fs", "signal"] }
-miniarg = { version = "0.4.0", default-features = false }
-tracing = "0.1.41"
-tracing-subscriber = "0.3.19"
 clap = { version = "4.5.40", features = ["derive"] }
-owo-colors = "4.2.2"
+eyre = { version = "0.6" }
+miniarg = { version = "0.4.0", default-features = false }
+owo-colors = { version = "4" }
+thiserror = { version = "2" }
+tokio = { version = "1", features = ["net", "io-util", "rt-multi-thread", "macros", "time", "fs", "signal"] }
+tracing = { version = "0.1" }
+tracing-subscriber = { version = "0.3" }
 
 [patch.crates-io]
 miniarg = { git = "https://github.com/threadexio/miniarg", rev = "f8adeff0ab3b67ffcbf58f938c0f008d0a6ebaa8" }
