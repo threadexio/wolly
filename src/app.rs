@@ -5,6 +5,7 @@ use std::sync::Arc;
 use eyre::{Context, Result, bail};
 use owo_colors::OwoColorize;
 use tokio::net::TcpListener;
+use tracing::Instrument;
 
 use crate::mapping::{Mapping, MappingKind};
 use crate::signal::Signals;
@@ -91,29 +92,32 @@ async fn spawn_tunnel(
 
             let opts = opts.clone();
             let app = Arc::clone(&app);
-            tokio::spawn(async move {
-                let span = error_span!("tunnel", from = addr.to_string(), to = to.to_string());
-                let _enter = span.enter();
-                info!("connected");
 
-                let upstream = app
-                    .upstream
-                    .get(&to.ip())
-                    .expect("upstream should be known");
+            let span = error_span!("tunnel", from = addr.to_string(), to = to.to_string());
+            tokio::spawn(
+                async move {
+                    info!("connected");
 
-                let mut a = a;
-                let mut b = match upstream.connect(to.port(), &opts).await {
-                    Ok(x) => x,
-                    Err(e) => {
-                        error!("cannot connect to upstream: {}", display!(e));
-                        return;
-                    }
-                };
+                    let upstream = app
+                        .upstream
+                        .get(&to.ip())
+                        .expect("upstream should be known");
 
-                info!("{} to upstream", "connected".bright_green());
-                let _ = tokio::io::copy_bidirectional(&mut a, &mut b).await;
-                info!("disconnected");
-            });
+                    let mut a = a;
+                    let mut b = match upstream.connect(to.port(), &opts).await {
+                        Ok(x) => x,
+                        Err(e) => {
+                            error!("cannot connect to upstream: {}", display!(e));
+                            return;
+                        }
+                    };
+
+                    info!("{} to upstream", "connected".bright_green());
+                    let _ = tokio::io::copy_bidirectional(&mut a, &mut b).await;
+                    info!("disconnected");
+                }
+                .instrument(span),
+            );
         }
     });
 
