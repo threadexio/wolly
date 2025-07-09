@@ -13,7 +13,10 @@ mod display;
 
 mod app;
 mod hardware_addr;
+mod mapping;
+mod parse;
 mod signal;
+mod upstream;
 
 use self::app::App;
 

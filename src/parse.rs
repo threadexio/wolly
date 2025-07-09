@@ -119,6 +119,8 @@ impl fmt::Display for Address {
     }
 }
 
+display!(@impl Address as address);
+
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum ParseAddressError {
     #[error("missing ':' separator")]
@@ -272,7 +274,10 @@ impl Mapping {
         let max_attempts = match NonZero::new(max_attempts) {
             Some(x) => x,
             None => {
-                warn!("'max-attempts' cannot be 0, will try to connect at least once");
+                warn!(
+                    "{}: 'max-attempts' cannot be 0, will try to connect at least once",
+                    display!(from)
+                );
                 NonZero::new(1).expect("1 is not 0")
             }
         };

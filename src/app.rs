@@ -6,19 +6,14 @@ use eyre::{Context, Result};
 use owo_colors::OwoColorize;
 use tokio::net::TcpListener;
 
+use crate::mapping::{Mapping, MappingKind};
 use crate::signal::Signals;
-
-mod mapping;
-mod parse;
-mod upstream;
-
-use self::mapping::{Mapping, MappingKind};
-use self::upstream::{ConnectOpts, Upstream};
+use crate::upstream::{ConnectOpts, Upstream};
 
 #[derive(Debug)]
 pub struct App {
-    upstream: HashMap<IpAddr, Upstream>,
-    mappings: Vec<Mapping>,
+    pub upstream: HashMap<IpAddr, Upstream>,
+    pub mappings: Vec<Mapping>,
 }
 
 impl App {
