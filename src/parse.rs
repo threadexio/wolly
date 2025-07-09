@@ -344,8 +344,8 @@ impl Mapping {
 pub enum ParseErrorKind {
     Upstream(ParseUpstreamError),
     Mapping(ParseMappingError),
-
     DuplicateUpstreamDirectives,
+    UnknownUpstream(IpAddr),
 }
 
 impl fmt::Display for ParseErrorKind {
@@ -354,6 +354,7 @@ impl fmt::Display for ParseErrorKind {
             Self::Upstream(x) => x.fmt(f),
             Self::Mapping(x) => x.fmt(f),
             Self::DuplicateUpstreamDirectives => f.write_str("duplicate upstream directives"),
+            Self::UnknownUpstream(x) => write!(f, "unknown upstream {}", display!(x)),
         }
     }
 }
@@ -405,6 +406,11 @@ impl FromStr for App {
                     let x = Mapping::parse(&mut stream)
                         .map_err(ParseErrorKind::Mapping)
                         .map_err(parse_error)?;
+
+                    let y = x.kind.upstream();
+                    if !upstream.contains_key(&y) {
+                        return Err(parse_error(ParseErrorKind::UnknownUpstream(y)));
+                    }
 
                     mappings.push(x);
                 }

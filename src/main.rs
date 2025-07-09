@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate tracing;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::Parser;
@@ -60,10 +60,15 @@ async fn main() -> ExitCode {
 }
 
 async fn try_main(args: CliArgs) -> Result<()> {
-    let config = tokio::fs::read_to_string(&args.config_path)
+    let app = read(&args.config_path)
         .await
         .with_context(|| format!("{}", display!(args.config_path)))?;
 
-    let app: App = config.parse()?;
     app.run().await
+}
+
+async fn read(path: &Path) -> Result<App> {
+    let config = tokio::fs::read_to_string(&path).await?;
+    let app = config.parse()?;
+    Ok(app)
 }

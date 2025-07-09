@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
-use eyre::{Context, Result};
+use eyre::{Context, Result, bail};
 use owo_colors::OwoColorize;
 use tokio::net::TcpListener;
 
@@ -18,6 +18,10 @@ pub struct App {
 
 impl App {
     pub async fn run(self) -> Result<()> {
+        if self.mappings.is_empty() {
+            bail!("no forwarding rules configured");
+        }
+
         let me = Arc::new(self);
         me._run().await
     }

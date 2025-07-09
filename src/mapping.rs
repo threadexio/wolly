@@ -25,6 +25,16 @@ pub enum MappingKind {
     },
 }
 
+impl MappingKind {
+    pub fn upstream(&self) -> IpAddr {
+        match self {
+            Self::OneToOne { to, .. } => to.ip(),
+            Self::ManyToOne { to, .. } => to.ip(),
+            Self::ManyToMany { to_ip, .. } => *to_ip,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Mapping {
     pub kind: MappingKind,
