@@ -1,19 +1,10 @@
-{ rustToolchain
-, makeRustPlatform
+{ rustPlatform
 , lib
 , ...
 }:
 
-with builtins;
-with lib;
-
 let
-  cargoManifest = fromTOML (readFile ../Cargo.toml);
-
-  rustPlatform = makeRustPlatform {
-    cargo = rustToolchain;
-    rustc = rustToolchain;
-  };
+  cargoManifest = lib.importTOML ../Cargo.toml;
 in
 
 rustPlatform.buildRustPackage {

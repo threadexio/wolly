@@ -11,47 +11,109 @@
     };
   };
 
-  outputs = { self, nixpkgs, flake-utils, rust-overlay, ... }:
+  outputs =
+    { self
+    , nixpkgs
+    , flake-utils
+    , rust-overlay
+    , ...
+    }:
     let
-      mkPkgs = system: import nixpkgs {
-        inherit system;
-        overlays = [
-          (import rust-overlay)
-          (final: _: {
-            rustToolchain = final.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
-          })
-          (final: _: {
-            wolly = final.callPackage ./nix/wolly.nix {};
-          })
-        ];
-      };
-    in
-    flake-utils.lib.eachDefaultSystem (system:
-      let pkgs = mkPkgs system; in
-      {
-        packages.default = pkgs.wolly;
-        apps.default = flake-utils.lib.mkApp { drv = self.packages.${system}.default; };
-
-        devShells = let
-          mkShell = pkgs: extraArgs: pkgs.mkShell (extraArgs // {
-            packages = with pkgs; [
-              buildPackages.rustToolchain
-              stdenv.cc
-            ];
-          });
-        in {
-          default = mkShell pkgs {};
-
-          cross-aarch64-gnu = mkShell pkgs.pkgsCross.aarch64-multiplatform {
-            CARGO_BUILD_TARGET = "aarch64-unknown-linux-gnu";
-            CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER = "aarch64-unknown-linux-gnu-gcc";
-          };
-
-          cross-aarch64-musl = mkShell pkgs.pkgsCross.aarch64-multiplatform-musl {
-            CARGO_BUILD_TARGET = "aarch64-unknown-linux-musl";
-            CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER = "aarch64-unknown-linux-musl-gcc";
-          };
+      mkPkgs =
+        system:
+        import nixpkgs {
+          inherit system;
+          overlays = [
+            (
+              _: prev:
+                let
+                  rust-bin = rust-overlay.lib.mkRustBin { } prev.buildPackages;
+                  rustToolchain = (rust-bin.fromRustupToolchainFile ./rust-toolchain.toml).override {
+                    targets = [
+                      "x86_64-unknown-linux-gnu"
+                      "x86_64-unknown-linux-musl"
+                      "aarch64-unknown-linux-gnu"
+                      "aarch64-unknown-linux-musl"
+                    ];
+                  };
+                in
+                {
+                  inherit rust-bin rustToolchain;
+                }
+            )
+            (
+              _: prev:
+                let
+                  rustPlatform = prev.makeRustPlatform {
+                    rustc = prev.rustToolchain;
+                    cargo = prev.rustToolchain;
+                  };
+                in
+                {
+                  wolly = prev.callPackage ./nix/wolly.nix { inherit rustPlatform; };
+                }
+            )
+          ];
         };
+    in
+    (flake-utils.lib.eachDefaultSystem (
+      system:
+      let
+        pkgs = mkPkgs system;
+      in
+      {
+        formatter = pkgs.nixpkgs-fmt;
+
+        packages = {
+          default = pkgs.wolly;
+
+          cross-x86_64-unknown-linux-gnu = pkgs.pkgsCross.gnu64.wolly;
+          cross-x86_64-unknown-linux-musl = pkgs.pkgsCross.musl64.wolly;
+          cross-aarch64-unknown-linux-gnu = pkgs.pkgsCross.aarch64-multiplatform.wolly;
+          cross-aarch64-unknown-linux-musl = pkgs.pkgsCross.aarch64-multiplatform-musl.wolly;
+        };
+
+        devShells =
+          let
+            mkShell =
+              pkgs:
+              let
+                inherit (pkgs) lib;
+                inherit (pkgs.stdenv.cc) targetPrefix;
+
+                escapeTarget = prefix: builtins.replaceStrings [ "-" ] [ "_" ] prefix;
+
+                cargoEnvTarget = lib.toUpper (escapeTarget (lib.removeSuffix "-" targetPrefix));
+              in
+              pkgs.mkShell {
+                packages =
+                  (with pkgs; [
+                    buildPackages.rustToolchain
+                    stdenv.cc
+                  ]);
+
+                CARGO_BUILD_TARGET = lib.removeSuffix "-" targetPrefix;
+                "CARGO_TARGET_${cargoEnvTarget}_LINKER" = "${targetPrefix}cc";
+              }
+            ;
+          in
+          {
+            default = mkShell pkgs;
+
+            cross-x86_64-unknown-linux-gnu = mkShell pkgs.pkgsCross.gnu64;
+            cross-x86_64-unknown-linux-musl = mkShell pkgs.pkgsCross.musl64;
+            cross-aarch64-unknown-linux-gnu = mkShell pkgs.pkgsCross.aarch64-multiplatform;
+            cross-aarch64-unknown-linux-musl = mkShell pkgs.pkgsCross.aarch64-multiplatform-musl;
+          };
+
+        apps.default = flake-utils.lib.mkApp { drv = self.packages.${system}.default; };
       }
-    );
+    ))
+    // {
+      overlays.default = (
+        final: _: {
+          wolly = self.packages.${final.system}.default;
+        }
+      );
+    };
 }
