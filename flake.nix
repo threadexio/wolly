@@ -94,6 +94,7 @@
 
                 CARGO_BUILD_TARGET = lib.removeSuffix "-" targetPrefix;
                 "CARGO_TARGET_${cargoEnvTarget}_LINKER" = "${targetPrefix}cc";
+                RUSTFLAGS = "-C target-feature=+crt-static";
               }
             ;
           in
