@@ -3,7 +3,6 @@
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
-    flake-utils.url = "github:numtide/flake-utils";
 
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
@@ -14,21 +13,31 @@
   outputs =
     { self
     , nixpkgs
-    , flake-utils
     , rust-overlay
     , ...
     }:
     let
-      mkPkgs =
-        system:
-        import nixpkgs {
-          inherit system;
-          overlays = [
-            (
-              _: prev:
-                let
+      systems = [
+        "aarch64-linux"
+        "aarch64-darwin"
+        "x86_64-linux"
+        "x86_64-darwin"
+      ];
+
+      inherit (nixpkgs) lib;
+
+      perSystem =
+        f:
+        lib.genAttrs systems (
+          system:
+          let
+            pkgs = import nixpkgs {
+              inherit system;
+
+              overlays = [
+                (final: prev: {
                   rust-bin = rust-overlay.lib.mkRustBin { } prev.buildPackages;
-                  rustToolchain = (rust-bin.fromRustupToolchainFile ./rust-toolchain.toml).override {
+                  rustToolchain = (final.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml).override {
                     targets = [
                       "x86_64-unknown-linux-gnu"
                       "x86_64-unknown-linux-musl"
@@ -36,85 +45,68 @@
                       "aarch64-unknown-linux-musl"
                     ];
                   };
-                in
-                {
-                  inherit rust-bin rustToolchain;
-                }
-            )
-            (
-              _: prev:
-                let
-                  rustPlatform = prev.makeRustPlatform {
-                    rustc = prev.rustToolchain;
-                    cargo = prev.rustToolchain;
-                  };
-                in
-                {
-                  wolly = prev.callPackage ./nix/wolly.nix { inherit rustPlatform; };
-                }
-            )
-          ];
-        };
-    in
-    (flake-utils.lib.eachDefaultSystem (
-      system:
-      let
-        pkgs = mkPkgs system;
-      in
-      {
-        formatter = pkgs.nixpkgs-fmt;
-
-        packages = {
-          default = pkgs.wolly;
-
-          cross-x86_64-unknown-linux-gnu = pkgs.pkgsCross.gnu64.wolly;
-          cross-x86_64-unknown-linux-musl = pkgs.pkgsCross.musl64.wolly;
-          cross-aarch64-unknown-linux-gnu = pkgs.pkgsCross.aarch64-multiplatform.wolly;
-          cross-aarch64-unknown-linux-musl = pkgs.pkgsCross.aarch64-multiplatform-musl.wolly;
-        };
-
-        devShells =
-          let
-            mkShell =
-              pkgs:
-              let
-                inherit (pkgs) lib;
-                inherit (pkgs.stdenv.cc) targetPrefix;
-
-                escapeTarget = prefix: builtins.replaceStrings [ "-" ] [ "_" ] prefix;
-
-                cargoEnvTarget = lib.toUpper (escapeTarget (lib.removeSuffix "-" targetPrefix));
-              in
-              pkgs.mkShell {
-                packages =
-                  (with pkgs; [
-                    buildPackages.rustToolchain
-                    stdenv.cc
-                  ]);
-
-                CARGO_BUILD_TARGET = lib.removeSuffix "-" targetPrefix;
-                "CARGO_TARGET_${cargoEnvTarget}_LINKER" = "${targetPrefix}cc";
-                RUSTFLAGS = "-C target-feature=+crt-static";
-              }
-            ;
+                })
+              ];
+            };
           in
-          {
-            default = mkShell pkgs;
+          f pkgs
+        );
+    in
+    {
+      formatter = perSystem (pkgs: pkgs.nixpkgs-fmt);
 
-            cross-x86_64-unknown-linux-gnu = mkShell pkgs.pkgsCross.gnu64;
-            cross-x86_64-unknown-linux-musl = mkShell pkgs.pkgsCross.musl64;
-            cross-aarch64-unknown-linux-gnu = mkShell pkgs.pkgsCross.aarch64-multiplatform;
-            cross-aarch64-unknown-linux-musl = mkShell pkgs.pkgsCross.aarch64-multiplatform-musl;
-          };
+      devShells = perSystem (
+        pkgs:
+        let
+          mkShell = pkgs: import ./nix/devshell.nix pkgs;
+        in
+        {
+          default = mkShell pkgs;
 
-        apps.default = flake-utils.lib.mkApp { drv = self.packages.${system}.default; };
-      }
-    ))
-    // {
-      overlays.default = (
-        final: _: {
-          wolly = self.packages.${final.system}.default;
+          cross-x86_64-unknown-linux-gnu = mkShell pkgs.pkgsCross.gnu64;
+          cross-x86_64-unknown-linux-musl = mkShell pkgs.pkgsCross.musl64;
+          cross-aarch64-unknown-linux-gnu = mkShell pkgs.pkgsCross.aarch64-multiplatform;
+          cross-aarch64-unknown-linux-musl = mkShell pkgs.pkgsCross.aarch64-multiplatform-musl;
         }
       );
+
+      packages = perSystem (
+        pkgs:
+        let
+          mkPkg =
+            pkgs:
+            pkgs.callPackage ./nix/package.nix {
+              rustPlatform = pkgs.makeRustPlatform {
+                rustc = pkgs.rustToolchain;
+                cargo = pkgs.rustToolchain;
+              };
+            };
+        in
+        {
+          default = mkPkg pkgs;
+
+          cross-x86_64-unknown-linux-gnu = mkPkg pkgs.pkgsCross.gnu64;
+          cross-x86_64-unknown-linux-musl = mkPkg pkgs.pkgsCross.musl64;
+          cross-aarch64-unknown-linux-gnu = mkPkg pkgs.pkgsCross.aarch64-multiplatform;
+          cross-aarch64-unknown-linux-musl = mkPkg pkgs.pkgsCross.aarch64-multiplatform-musl;
+        }
+      );
+
+      apps = perSystem (
+        pkgs:
+        let
+          mkApp = drv: {
+            type = "app";
+            program = lib.getExe drv;
+          };
+        in
+        lib.mapAttrs (_: mkApp) self.packages.${pkgs.system}
+      );
+
+      overlays.default = final: _: {
+        wolly = self.packages.${final.system}.default;
+      };
+
+      nixosModules.default = import ./nix/module.nix { inherit self; };
     };
 }

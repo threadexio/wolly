@@ -1,6 +1,5 @@
 { rustPlatform
 , lib
-, ...
 }:
 
 let
