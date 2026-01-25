@@ -57,13 +57,13 @@ impl Upstream {
             Err(_) => {}
         }
 
-        self.wake().await?;
-        sleep(opts.wait_for).await;
-
         let mut attempts = 0;
         let mut delay = opts.retry_delay;
 
         loop {
+            self.wake().await?;
+            sleep(opts.wait_for).await;
+
             match TcpStream::connect(to).await {
                 Ok(x) => return Ok(x),
                 Err(e) if !is_retry_error(&e) => return Err(e),
