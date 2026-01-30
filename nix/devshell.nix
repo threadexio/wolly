@@ -1,14 +1,11 @@
 { mkShell
 , stdenv
 , buildPackages
-, lib
 , ...
 }:
 
 let
-  inherit (stdenv.cc) targetPrefix;
-  escapeTarget = prefix: lib.replaceStrings [ "-" ] [ "_" ] prefix;
-  cargoEnvTarget = lib.toUpper (escapeTarget (lib.removeSuffix "-" targetPrefix));
+  inherit (stdenv) hostPlatform;
 in
 
 mkShell {
@@ -17,7 +14,5 @@ mkShell {
     stdenv.cc
   ];
 
-  CARGO_BUILD_TARGET = lib.removeSuffix "-" targetPrefix;
-  "CARGO_TARGET_${cargoEnvTarget}_LINKER" = "${targetPrefix}cc";
-  RUSTFLAGS = "-C target-feature=+crt-static";
+  CARGO_BUILD_TARGET = hostPlatform.config;
 }

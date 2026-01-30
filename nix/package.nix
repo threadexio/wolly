@@ -20,12 +20,7 @@ rustPlatform.buildRustPackage {
     ];
   };
 
-  cargoLock = {
-    lockFile = ../Cargo.lock;
-    outputHashes = {
-      "miniarg-0.4.0" = "sha256-UIH38oGo6pUc6lN9JrhHsTjvmUoubxSw3+9+1vVyYSc=";
-    };
-  };
+  cargoLock.lockFile = ../Cargo.lock;
 
   meta = with lib; {
     inherit (cargoManifest.package) description homepage;
