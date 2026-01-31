@@ -32,7 +32,7 @@ jobs:
     steps:
       - uses: cachix/install-nix-action@v31
       - uses: actions/checkout@v4
-      - run: nix build ".#cross-${{ matrix.triple }}"
+      - run: nix build ".#${{ matrix.triple }}.default"
       - uses: actions/upload-artifact@v4
         with:
           name: wolly-${{ matrix.triple }}
