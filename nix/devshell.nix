@@ -1,6 +1,6 @@
 { mkShell
 , stdenv
-, buildPackages
+, rustToolchain
 , ...
 }:
 
@@ -9,10 +9,7 @@ let
 in
 
 mkShell {
-  packages = [
-    buildPackages.rustToolchain
-    stdenv.cc
-  ];
+  nativeBuildInputs = [ rustToolchain ];
 
   CARGO_BUILD_TARGET = hostPlatform.config;
 }

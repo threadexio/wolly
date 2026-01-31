@@ -23,7 +23,7 @@ in
         The wolly package to use.
       '';
       type = types.package;
-      default = self.packages.${pkgs.stdenv.system}.default;
+      default = pkgs.wolly;
     };
 
     upstream = mkOption {
