@@ -1,15 +1,20 @@
 { mkShell
 , stdenv
 , rustToolchain
+, lib
 , ...
 }:
 
 let
-  inherit (stdenv) hostPlatform;
+  inherit (stdenv) buildPlatform hostPlatform;
 in
 
-mkShell {
+mkShell
+{
   nativeBuildInputs = [ rustToolchain ];
 
-  CARGO_BUILD_TARGET = hostPlatform.config;
+  env = lib.optionalAttrs (buildPlatform != hostPlatform) {
+    CARGO_BUILD_TARGET = hostPlatform.rust.rustcTarget;
+    "CARGO_TARGET_${hostPlatform.rust.cargoEnvVarTarget}_LINKER" = "${hostPlatform.config}-cc";
+  };
 }
